@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/linux_rust_bindings",
+    "crates/linux_rust_safe",
+    "crates/linux_rust_generated",
+]
+
+[workspace.package]
+edition     = "2021"
+rust-version = "1.78.0"
+license     = "GPL-2.0"
+repository  = "https://github.com/your-org/linux-c2rust-pipeline"
+
+[workspace.dependencies]
+# No std — kernel environment
+kernel = { path = "vendor/kernel" }
+
+[profile.release]
+opt-level = "s"       # size-optimized for kernel modules
+lto       = true
+panic     = "abort"   # kernel must never unwind
+overflow-checks = true
+
+[profile.dev]
+overflow-checks = true
+panic           = "abort"

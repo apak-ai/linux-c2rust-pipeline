@@ -1,0 +1,298 @@
+name: "Stage 3: Compatibility Check"
+
+on:
+  pull_request:
+    paths: ['src/rust/**', 'src/c/**']
+  workflow_run:
+    workflows: ["Stage 2: Security Evaluation"]
+    types: [completed]
+  workflow_dispatch:
+
+env:
+  RUST_TOOLCHAIN: nightly-2024-12-15
+  KERNEL_VERSION: "6.12"
+  KERNEL_SRC: /opt/linux-src
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Job 1: Fetch & configure reference kernel tree
+  # ─────────────────────────────────────────────
+  prepare-kernel:
+    name: Prepare Kernel Source
+    runs-on: ubuntu-24.04
+    outputs:
+      kernel-cache-key: ${{ steps.cache-key.outputs.key }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute kernel cache key
+        id: cache-key
+        run: echo "key=kernel-${{ env.KERNEL_VERSION }}-$(date +%Y%W)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        id: kernel-cache
+        with:
+          path: ${{ env.KERNEL_SRC }}
+          key: ${{ steps.cache-key.outputs.key }}
+
+      - name: Install kernel build deps
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential flex bison bc libssl-dev libelf-dev \
+            clang llvm lld libclang-dev dwarves pahole \
+            python3-pip cpio
+
+      - name: Clone Linux kernel
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth=1 \
+            --branch "v${{ env.KERNEL_VERSION }}" \
+            https://github.com/torvalds/linux.git \
+            "$KERNEL_SRC"
+
+      - name: Apply Rust-for-Linux patches
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        run: |
+          cd "$KERNEL_SRC"
+          # Enable Rust support in Kconfig
+          scripts/config --enable CONFIG_RUST
+          scripts/config --enable CONFIG_SAMPLES_RUST
+          make rustavailable 2>&1
+
+  # ─────────────────────────────────────────────
+  # Job 2: FFI binding compatibility via bindgen
+  # ─────────────────────────────────────────────
+  ffi-bindings:
+    name: FFI Bindings Verification
+    needs: prepare-kernel
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.KERNEL_SRC }}
+          key: ${{ needs.prepare-kernel.outputs.kernel-cache-key }}
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install bindgen
+        run: cargo install bindgen-cli --locked
+
+      - name: Generate Rust bindings from kernel headers
+        run: |
+          bash scripts/gen_bindings.sh \
+            --kernel-src "$KERNEL_SRC" \
+            --output src/rust/bindings/auto_generated.rs \
+            --arch x86_64 \
+            2>&1 | tee bindings_gen.log
+
+      - name: Verify bindings compile
+        run: |
+          cargo build --package linux_rust_bindings \
+            --target x86_64-unknown-none \
+            2>&1 | tee bindings_build.log
+
+      - name: Check for ABI-breaking changes
+        run: |
+          # Compare against previous bindings snapshot
+          if [ -f src/rust/bindings/snapshot.rs ]; then
+            python3 scripts/abi_diff.py \
+              src/rust/bindings/snapshot.rs \
+              src/rust/bindings/auto_generated.rs \
+              --fail-on-breaking \
+              2>&1 | tee abi_diff.log
+          else
+            echo "No snapshot found; creating initial snapshot."
+            cp src/rust/bindings/auto_generated.rs src/rust/bindings/snapshot.rs
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ffi-bindings-report
+          path: |
+            src/rust/bindings/auto_generated.rs
+            bindings_gen.log
+            bindings_build.log
+            abi_diff.log
+
+  # ─────────────────────────────────────────────
+  # Job 3: Symbol export / linkage verification
+  # ─────────────────────────────────────────────
+  symbol-compat:
+    name: Symbol Compatibility
+    needs: prepare-kernel
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.KERNEL_SRC }}
+          key: ${{ needs.prepare-kernel.outputs.kernel-cache-key }}
+
+      - name: Install LLVM tools
+        run: sudo apt-get install -y llvm lld nm binutils
+
+      - name: Extract expected symbols from kernel
+        run: |
+          python3 scripts/extract_symbols.py \
+            --kernel-src "$KERNEL_SRC" \
+            --output expected_symbols.json \
+            2>&1
+
+      - name: Verify Rust modules export required symbols
+        run: |
+          python3 scripts/verify_symbols.py \
+            --expected expected_symbols.json \
+            --rust-src  src/rust/ \
+            --report    symbol_compat_report.json \
+            2>&1 | tee symbol_compat.log
+
+          # Fail if any required kernel symbols are missing
+          python3 -c "
+          import json, sys
+          r = json.load(open('symbol_compat_report.json'))
+          missing = r.get('missing_symbols', [])
+          if missing:
+              print('MISSING SYMBOLS:', missing)
+              sys.exit(1)
+          print('All required symbols present.')
+          "
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: symbol-compat-report
+          path: |
+            symbol_compat_report.json
+            symbol_compat.log
+
+  # ─────────────────────────────────────────────
+  # Job 4: Cross-language integration test (C calls Rust & vice-versa)
+  # ─────────────────────────────────────────────
+  cross-lang-integration:
+    name: Cross-Language Integration Tests
+    needs: [ffi-bindings, symbol-compat]
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        arch: [x86_64, arm64, riscv64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: >
+            x86_64-unknown-none
+            aarch64-unknown-none
+            riscv64gc-unknown-none-elf
+
+      - name: Install cross-compilation toolchains
+        run: |
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            gcc-riscv64-linux-gnu \
+            qemu-user-static
+
+      - name: Build integration test harness (${{ matrix.arch }})
+        run: |
+          bash scripts/build_integration.sh \
+            --arch ${{ matrix.arch }} \
+            --kernel-src "$KERNEL_SRC" \
+            2>&1 | tee build_integration_${{ matrix.arch }}.log
+
+      - name: Run cross-language tests (${{ matrix.arch }})
+        run: |
+          bash scripts/run_integration_tests.sh \
+            --arch ${{ matrix.arch }} \
+            --report integration_report_${{ matrix.arch }}.json \
+            2>&1 | tee integration_${{ matrix.arch }}.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-${{ matrix.arch }}
+          path: |
+            integration_report_${{ matrix.arch }}.json
+            integration_${{ matrix.arch }}.log
+            build_integration_${{ matrix.arch }}.log
+
+  # ─────────────────────────────────────────────
+  # Job 5: Kbuild compilation test (in-tree)
+  # ─────────────────────────────────────────────
+  kbuild-compile:
+    name: Kbuild In-Tree Compilation
+    needs: prepare-kernel
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        arch: [x86_64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.KERNEL_SRC }}
+          key: ${{ needs.prepare-kernel.outputs.kernel-cache-key }}
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rust-src
+          targets: x86_64-unknown-none aarch64-unknown-none
+
+      - name: Inject Rust modules into kernel tree
+        run: |
+          bash scripts/inject_modules.sh \
+            --kernel-src "$KERNEL_SRC" \
+            --rust-src   src/rust/ \
+            --arch       ${{ matrix.arch }} \
+            2>&1
+
+      - name: Configure kernel with Rust (${{ matrix.arch }})
+        run: |
+          cd "$KERNEL_SRC"
+          ARCH=${{ matrix.arch == 'arm64' && 'arm64' || 'x86' }} \
+          make defconfig
+          scripts/config --enable CONFIG_RUST
+          scripts/config --enable CONFIG_RUST_IS_AVAILABLE
+          make olddefconfig
+
+      - name: Build kernel with Rust modules (${{ matrix.arch }})
+        run: |
+          cd "$KERNEL_SRC"
+          ARCH=${{ matrix.arch == 'arm64' && 'arm64' || 'x86' }} \
+          CROSS_COMPILE=${{ matrix.arch == 'arm64' && 'aarch64-linux-gnu-' || '' }} \
+          LLVM=1 \
+          make -j$(nproc) 2>&1 | tee /tmp/kbuild_${{ matrix.arch }}.log
+
+          # Check for our Rust module objects
+          find . -name "*.o" | xargs grep -l "rust_" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kbuild-${{ matrix.arch }}
+          path: /tmp/kbuild_${{ matrix.arch }}.log
+
+  # ─────────────────────────────────────────────
+  # Gate
+  # ─────────────────────────────────────────────
+  compat-gate:
+    name: Compatibility Gate
+    needs:
+      - ffi-bindings
+      - symbol-compat
+      - cross-lang-integration
+      - kbuild-compile
+    runs-on: ubuntu-24.04
+    steps:
+      - name: All compatibility checks passed
+        run: echo "### Compatibility Gate: PASSED" >> "$GITHUB_STEP_SUMMARY"

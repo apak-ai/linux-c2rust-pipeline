@@ -1,0 +1,233 @@
+name: "Stage 2: Security Evaluation"
+
+on:
+  pull_request:
+    paths: ['src/rust/**']
+  workflow_run:
+    workflows: ["Stage 1: C to Rust Conversion"]
+    types: [completed]
+  workflow_dispatch:
+
+env:
+  RUST_TOOLCHAIN: nightly-2024-12-15
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Job 1: Static analysis via Clippy + custom lints
+  # ─────────────────────────────────────────────
+  clippy-strict:
+    name: Clippy (kernel-strict profile)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run Clippy with kernel safety lints
+        run: |
+          cargo clippy \
+            --all-targets \
+            --all-features \
+            -- \
+            -D warnings \
+            -D clippy::undocumented_unsafe_blocks \
+            -D clippy::unsafe_removed_from_name \
+            -D clippy::multiple_unsafe_ops_per_block \
+            -W clippy::missing_safety_doc \
+            -W clippy::ptr_as_ptr \
+            -W clippy::cast_ptr_alignment \
+            -D clippy::transmute_ptr_to_ref \
+            -D clippy::mem_forget \
+            -W clippy::integer_arithmetic \
+            2>&1 | tee clippy_report.txt
+
+      - name: Annotate PR with Clippy findings
+        if: github.event_name == 'pull_request'
+        uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: "--all-features -- -D warnings"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clippy-report
+          path: clippy_report.txt
+
+  # ─────────────────────────────────────────────
+  # Job 2: Unsafe code quantification via cargo-geiger
+  # ─────────────────────────────────────────────
+  unsafe-audit:
+    name: Unsafe Code Audit (cargo-geiger)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install cargo-geiger
+        run: cargo install cargo-geiger --locked
+
+      - name: Run geiger scan
+        run: |
+          cargo geiger --output-format Json \
+            2>/dev/null > geiger_report.json || true
+          python3 scripts/parse_geiger.py geiger_report.json \
+            --threshold-unsafe-fns 50 \
+            --threshold-unsafe-exprs 200 \
+            --fail-on-exceed \
+            2>&1 | tee geiger_summary.txt
+
+      - name: Post geiger summary to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('geiger_summary.txt', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Unsafe Code Audit (cargo-geiger)\n\`\`\`\n${summary}\n\`\`\``
+            });
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: geiger-report
+          path: |
+            geiger_report.json
+            geiger_summary.txt
+
+  # ─────────────────────────────────────────────
+  # Job 3: Known vulnerability scan (cargo-audit)
+  # ─────────────────────────────────────────────
+  vuln-scan:
+    name: Vulnerability Scan (cargo-audit)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit dependencies
+        run: |
+          cargo audit \
+            --deny warnings \
+            --deny unsound \
+            --deny yanked \
+            --json > audit_report.json 2>&1 || AUDIT_FAILED=1
+
+          python3 scripts/format_audit.py audit_report.json
+          [ -z "$AUDIT_FAILED" ] || exit 1
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-report
+          path: audit_report.json
+
+  # ─────────────────────────────────────────────
+  # Job 4: Undefined behaviour detection via Miri
+  # ─────────────────────────────────────────────
+  miri:
+    name: Miri UB Detection
+    runs-on: ubuntu-24.04
+    # Only run unit-testable pure-Rust modules (not FFI-heavy kernel glue)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: miri, rust-src
+
+      - name: Run Miri on safe modules
+        run: |
+          # MIRIFLAGS enable isolation and stacked-borrows model
+          MIRIFLAGS="-Zmiri-isolation-error=warn -Zmiri-symbolic-alignment-check \
+                     -Zmiri-strict-provenance -Zmiri-tag-raw-pointers" \
+          cargo miri test \
+            --package linux_rust_safe \
+            2>&1 | tee miri_report.txt || MIRI_FAILED=1
+
+          grep -E "^error|UNDEFINED BEHAVIOR" miri_report.txt && echo "::error::Miri found UB" || true
+          [ -z "$MIRI_FAILED" ] || exit 1
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: miri-report
+          path: miri_report.txt
+
+  # ─────────────────────────────────────────────
+  # Job 5: Kernel-specific security policy checks
+  # ─────────────────────────────────────────────
+  kernel-security-policy:
+    name: Kernel Security Policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for banned patterns
+        run: bash scripts/security_policy.sh src/rust/ 2>&1 | tee policy_report.txt
+
+      - name: Validate safety comments on all unsafe blocks
+        run: |
+          python3 scripts/check_safety_docs.py src/rust/ \
+            --require-safety-comment \
+            --require-invariant-tag \
+            2>&1 | tee safety_doc_report.txt
+
+      - name: Stack usage analysis
+        run: |
+          # Kernel functions must not exceed 1024 bytes stack usage
+          bash scripts/check_stack_usage.sh \
+            --max-bytes 1024 \
+            --arch x86_64 \
+            src/rust/ 2>&1 | tee stack_report.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-policy-report
+          path: |
+            policy_report.txt
+            safety_doc_report.txt
+            stack_report.txt
+
+  # ─────────────────────────────────────────────
+  # Gate: all security jobs must pass
+  # ─────────────────────────────────────────────
+  security-gate:
+    name: Security Gate
+    needs:
+      - clippy-strict
+      - unsafe-audit
+      - vuln-scan
+      - miri
+      - kernel-security-policy
+    runs-on: ubuntu-24.04
+    steps:
+      - name: All security checks passed
+        run: |
+          echo "### Security Gate: PASSED" >> "$GITHUB_STEP_SUMMARY"
+          echo "All required security jobs completed successfully." >> "$GITHUB_STEP_SUMMARY"

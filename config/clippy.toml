@@ -1,0 +1,14 @@
+# clippy.toml — kernel-appropriate Clippy configuration
+# Applied during Stage 2 security evaluation
+
+# Stack usage: kernel functions must stay under 1KB
+stack-usage-threshold = 1024
+
+# Cognitive complexity limit — keep kernel code reviewable
+cognitive-complexity-threshold = 25
+
+# Disallow large stack allocations (use kernel heap)
+array-size-threshold = 512
+
+# Warn on lossy casts that may drop bits
+too-large-for-stack = 512

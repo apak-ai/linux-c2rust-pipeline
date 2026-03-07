@@ -1,0 +1,16 @@
+# KUnit configuration for Rust module tests
+# Used by kunit.py to configure UML kernel for testing
+
+CONFIG_KUNIT=y
+CONFIG_KUNIT_ALL_TESTS=n
+CONFIG_RUST=y
+CONFIG_RUST_IS_AVAILABLE=y
+CONFIG_RUST_CONVERTED_MODULES=y
+
+# Enable specific test suites for converted modules
+CONFIG_RUST_KERNEL_TESTS=y
+CONFIG_KUNIT_DEBUGFS=y
+
+# Required for UML testing
+CONFIG_UML=y
+CONFIG_PRINTK=y

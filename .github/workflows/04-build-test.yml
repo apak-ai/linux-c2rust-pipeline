@@ -1,0 +1,352 @@
+name: "Stage 4: Kernel Build & Boot Test"
+
+on:
+  pull_request:
+    types: [labeled]
+    # Only run when all prior gates have stamped the PR
+  workflow_run:
+    workflows: ["Stage 3: Compatibility Check"]
+    types: [completed]
+  workflow_dispatch:
+
+env:
+  RUST_TOOLCHAIN: nightly-2024-12-15
+  KERNEL_SRC: /opt/linux-src
+  KERNEL_VERSION: "6.12"
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Job 1: Full kernel build (release)
+  # ─────────────────────────────────────────────
+  full-build:
+    name: Full Kernel Build (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64, riscv64]
+        include:
+          - arch: x86_64
+            cross_compile: ""
+            qemu_cpu: "qemu64"
+            qemu_machine: "q35"
+            kernel_image: "arch/x86/boot/bzImage"
+          - arch: arm64
+            cross_compile: "aarch64-linux-gnu-"
+            qemu_cpu: "cortex-a72"
+            qemu_machine: "virt"
+            kernel_image: "arch/arm64/boot/Image"
+          - arch: riscv64
+            cross_compile: "riscv64-linux-gnu-"
+            qemu_cpu: "rv64"
+            qemu_machine: "virt"
+            kernel_image: "arch/riscv/boot/Image"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.KERNEL_SRC }}
+          key: kernel-${{ env.KERNEL_VERSION }}-${{ runner.os }}-${{ matrix.arch }}
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rust-src, rustfmt, bindgen
+          targets: >
+            x86_64-unknown-none
+            aarch64-unknown-none
+            riscv64gc-unknown-none-elf
+
+      - name: Install build toolchain (${{ matrix.arch }})
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential flex bison bc libssl-dev libelf-dev \
+            clang llvm lld libclang-dev dwarves pahole \
+            gcc-aarch64-linux-gnu gcc-riscv64-linux-gnu \
+            qemu-system-x86 qemu-system-arm qemu-system-misc \
+            cpio
+
+      - name: Inject & configure kernel
+        run: |
+          bash scripts/inject_modules.sh \
+            --kernel-src "$KERNEL_SRC" \
+            --rust-src   src/rust/ \
+            --arch       ${{ matrix.arch }}
+          cd "$KERNEL_SRC"
+          cp "$GITHUB_WORKSPACE/config/kernel_${{ matrix.arch }}.config" .config
+          make LLVM=1 CROSS_COMPILE=${{ matrix.cross_compile }} olddefconfig
+
+      - name: Build kernel
+        run: |
+          cd "$KERNEL_SRC"
+          make \
+            LLVM=1 \
+            CROSS_COMPILE=${{ matrix.cross_compile }} \
+            -j$(nproc) \
+            ${{ matrix.kernel_image }} modules \
+            2>&1 | tee $GITHUB_WORKSPACE/build_${{ matrix.arch }}.log
+          echo "BUILD_EXIT=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Verify Rust module symbols in vmlinux
+        run: |
+          nm "$KERNEL_SRC/vmlinux" 2>/dev/null | \
+            python3 scripts/verify_rust_symbols.py \
+            --expected config/expected_rust_symbols.txt \
+            2>&1 | tee symbol_verify_${{ matrix.arch }}.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-image-${{ matrix.arch }}
+          path: |
+            ${{ env.KERNEL_SRC }}/${{ matrix.kernel_image }}
+            build_${{ matrix.arch }}.log
+          retention-days: 3
+
+  # ─────────────────────────────────────────────
+  # Job 2: KUnit tests (in-kernel unit tests for Rust modules)
+  # ─────────────────────────────────────────────
+  kunit:
+    name: KUnit Tests (${{ matrix.arch }})
+    needs: full-build
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        arch: [x86_64]   # KUnit UML only supports x86_64 easily
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.KERNEL_SRC }}
+          key: kernel-${{ env.KERNEL_VERSION }}-${{ runner.os }}-${{ matrix.arch }}
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rust-src
+
+      - name: Install KUnit dependencies
+        run: |
+          sudo apt-get install -y python3-pip
+          pip3 install kunit-tool
+
+      - name: Copy KUnit test files into kernel tree
+        run: |
+          cp -r tests/kunit/ "$KERNEL_SRC/rust/tests/"
+          # Register our test modules in Kbuild
+          echo 'obj-$(CONFIG_RUST_KERNEL_TESTS) += tests/' \
+            >> "$KERNEL_SRC/rust/Makefile"
+
+      - name: Run KUnit tests via UML
+        run: |
+          cd "$KERNEL_SRC"
+          ./tools/testing/kunit/kunit.py run \
+            --kunitconfig "$GITHUB_WORKSPACE/config/kunit.kunitconfig" \
+            --arch um \
+            --jobs $(nproc) \
+            --raw_output \
+            2>&1 | tee $GITHUB_WORKSPACE/kunit_results.log
+
+          # Parse KTAP output
+          python3 "$GITHUB_WORKSPACE/scripts/parse_ktap.py" \
+            kunit_results.log \
+            --junit-output kunit_junit.xml \
+            --fail-on-error
+
+      - name: Publish KUnit test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: KUnit Tests (${{ matrix.arch }})
+          path: kunit_junit.xml
+          reporter: java-junit
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kunit-results-${{ matrix.arch }}
+          path: |
+            kunit_results.log
+            kunit_junit.xml
+
+  # ─────────────────────────────────────────────
+  # Job 3: QEMU boot test with minimal initramfs
+  # ─────────────────────────────────────────────
+  qemu-boot:
+    name: QEMU Boot Test (${{ matrix.arch }})
+    needs: full-build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
+        include:
+          - arch: x86_64
+            qemu_bin: qemu-system-x86_64
+            qemu_args: "-M q35 -cpu qemu64 -m 512M -nographic -no-reboot"
+            kernel_image: "arch/x86/boot/bzImage"
+            append: "console=ttyS0 panic=5 oops=panic"
+          - arch: arm64
+            qemu_bin: qemu-system-aarch64
+            qemu_args: "-M virt -cpu cortex-a72 -m 512M -nographic -no-reboot"
+            kernel_image: "arch/arm64/boot/Image"
+            append: "console=ttyAMA0 panic=5 oops=panic"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download kernel image
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-image-${{ matrix.arch }}
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get install -y \
+            qemu-system-x86 \
+            qemu-system-arm \
+            cpio
+
+      - name: Build minimal initramfs
+        run: |
+          bash scripts/build_initramfs.sh \
+            --arch ${{ matrix.arch }} \
+            --output initramfs_${{ matrix.arch }}.cpio.gz \
+            --test-script scripts/boot_test_payload.sh
+
+      - name: Boot kernel in QEMU
+        timeout-minutes: 10
+        run: |
+          KERNEL_IMG=$(ls ${{ matrix.kernel_image }} 2>/dev/null || find . -name "bzImage" -o -name "Image" | head -1)
+          timeout 300 \
+            ${{ matrix.qemu_bin }} \
+            ${{ matrix.qemu_args }} \
+            -kernel "$KERNEL_IMG" \
+            -initrd initramfs_${{ matrix.arch }}.cpio.gz \
+            -append "${{ matrix.append }} init=/init" \
+            -serial file:boot_log_${{ matrix.arch }}.txt \
+            || QEMU_EXIT=$?
+
+          # Validate boot was successful (init reached userspace)
+          python3 scripts/validate_boot_log.py \
+            boot_log_${{ matrix.arch }}.txt \
+            --expect-string "Boot test PASSED" \
+            --forbid-strings "Kernel panic" "BUG:" "WARNING:" "OOPS:" \
+            2>&1
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: boot-log-${{ matrix.arch }}
+          path: boot_log_${{ matrix.arch }}.txt
+
+  # ─────────────────────────────────────────────
+  # Job 4: Kernel selftest suite (kselftest)
+  # ─────────────────────────────────────────────
+  kselftest:
+    name: Kernel Selftests (${{ matrix.arch }})
+    needs: qemu-boot
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        arch: [x86_64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.KERNEL_SRC }}
+          key: kernel-${{ env.KERNEL_VERSION }}-${{ runner.os }}-${{ matrix.arch }}
+
+      - name: Download kernel image
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-image-${{ matrix.arch }}
+
+      - name: Build kselftest for Rust modules
+        run: |
+          cd "$KERNEL_SRC"
+          make LLVM=1 \
+            -C tools/testing/selftests \
+            TARGETS="rust" \
+            -j$(nproc) \
+            2>&1 | tee $GITHUB_WORKSPACE/kselftest_build.log
+
+      - name: Run selftests in QEMU
+        run: |
+          bash scripts/run_kselftest_qemu.sh \
+            --arch ${{ matrix.arch }} \
+            --kernel-src "$KERNEL_SRC" \
+            --report kselftest_report.json \
+            2>&1 | tee kselftest_results.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kselftest-${{ matrix.arch }}
+          path: |
+            kselftest_report.json
+            kselftest_results.log
+
+  # ─────────────────────────────────────────────
+  # Job 5: Report & merge gate
+  # ─────────────────────────────────────────────
+  final-report:
+    name: Final Pipeline Report
+    needs:
+      - full-build
+      - kunit
+      - qemu-boot
+      - kselftest
+    runs-on: ubuntu-24.04
+    if: always()
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Generate consolidated report
+        run: |
+          python3 scripts/gen_report.py \
+            --artifacts-dir artifacts/ \
+            --output pipeline_report.md \
+            --format markdown
+
+          cat pipeline_report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post report to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('pipeline_report.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            });
+
+      - name: Evaluate overall pass/fail
+        run: |
+          python3 scripts/evaluate_pipeline.py \
+            --artifacts-dir artifacts/ \
+            --fail-on-security-issues \
+            --fail-on-compat-failures \
+            --fail-on-boot-failure \
+            2>&1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-final-report
+          path: pipeline_report.md
+          retention-days: 30

@@ -1,0 +1,11 @@
+# expected_rust_symbols.txt
+# List of Rust symbols that must be present in vmlinux after build.
+# Format: one symbol per line (exact nm output format, or bare name).
+# Add symbols here as you convert C modules to Rust.
+
+# Example entries — replace with actual exported symbols from your modules:
+# rust_converted_init
+# rust_converted_exit
+# _rust_alloc
+# _rust_dealloc
+# _rust_realloc
