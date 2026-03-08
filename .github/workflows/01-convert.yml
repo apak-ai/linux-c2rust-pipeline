@@ -40,6 +40,19 @@ jobs:
             bear clang llvm lld libclang-dev \
             python3-pip dwarves pahole
 
+      - name: Cache kernel source
+        uses: actions/cache@v4
+        with:
+          path: /opt/linux-src
+          key: linux-src-6.12
+
+      - name: Clone Linux kernel source
+        run: |
+          if [ ! -d /opt/linux-src ]; then
+            sudo git clone --depth=1 --branch v6.12 \
+              https://github.com/torvalds/linux.git /opt/linux-src
+          fi
+
       - name: Generate compile_commands.json via Bear
         run: |
           bash scripts/gen_compile_commands.sh
