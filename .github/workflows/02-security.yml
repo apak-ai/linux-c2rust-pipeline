@@ -136,7 +136,22 @@ jobs:
             --deny yanked \
             --json > audit_report.json 2>&1 || AUDIT_FAILED=1
 
-          python3 scripts/format_audit.py audit_report.json
+          python3 - audit_report.json <<'EOF'
+          import json, sys
+          try:
+            data = json.load(open(sys.argv[1]))
+          except Exception as e:
+            print(f"Warning: could not parse audit report: {e}"); sys.exit(0)
+          vulns = data.get("vulnerabilities", {}); found = vulns.get("found", [])
+          warnings = data.get("warnings", {})
+          print(f"### cargo audit summary")
+          print(f"- Vulnerabilities: {vulns.get('count', len(found))}")
+          print(f"- Yanked: {len(warnings.get('yanked', []))}")
+          print(f"- Unsound: {len(warnings.get('unsound', []))}")
+          for v in found:
+            adv=v.get("advisory",{}); pkg=v.get("package",{})
+            print(f"  - [{adv.get('id','N/A')}] {pkg.get('name','?')} {pkg.get('version','?')}: {adv.get('title','')}")
+          EOF
           [ -z "$AUDIT_FAILED" ] || exit 1
 
       - uses: actions/upload-artifact@v4
