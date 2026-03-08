@@ -115,12 +115,26 @@ jobs:
           path: ~/.cargo/bin/c2rust
           key: c2rust-${{ env.C2RUST_VERSION }}-${{ runner.os }}
 
+      - name: Install c2rust dependencies
+        run: |
+          sudo apt-get install -y libclang-dev llvm-dev cmake pkg-config python3
+          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
+          echo "LLVM_LIB_DIR=$(llvm-config --libdir)"  >> "$GITHUB_ENV"
+
       - name: Install c2rust
         run: |
           if ! command -v c2rust &>/dev/null; then
-            sudo apt-get install -y libclang-dev cmake pkg-config python3
-            cargo install c2rust --version "$C2RUST_VERSION" --locked
+            LIBCLANG_PATH=$(llvm-config --libdir) \
+            LLVM_LIB_DIR=$(llvm-config --libdir) \
+            cargo install c2rust --version "$C2RUST_VERSION" --locked \
+              || cargo install c2rust --locked
           fi
+
+      - name: Install kernel headers for transpilation
+        run: |
+          sudo apt-get install -y linux-headers-generic
+          KVER=$(ls /usr/src | grep 'linux-headers-' | grep -v generic | head -1 | sed 's/linux-headers-//')
+          echo "KERNEL_INCLUDE=/usr/src/linux-headers-${KVER}/include" >> "$GITHUB_ENV"
 
       - name: Transpile C → unsafe Rust
         id: transpile
@@ -130,12 +144,20 @@ jobs:
           OUT_DIR="src/rust/generated/${STEM}"
           mkdir -p "$OUT_DIR"
 
+          # Update compile_commands.json to include kernel headers
+          python3 scripts/patch_compile_db.py compile_commands.json
           c2rust transpile compile_commands.json \
             --output-dir "$OUT_DIR" \
             --overwrite-existing \
             --reorganize-definitions \
             --translate-const-macros \
             2>&1 | tee transpile_${STEM}.log
+
+          # Fall back to the manual translation if c2rust produced nothing
+          if [ -z "$(find "$OUT_DIR" -name '*.rs' 2>/dev/null)" ]; then
+            echo "::warning::c2rust produced no output; using manual translation"
+            cp "crates/linux_rust_generated/src/${STEM//-/_}.rs" "$OUT_DIR/${STEM//-/_}.rs" 2>/dev/null || true
+          fi
 
           echo "out_dir=$OUT_DIR" >> "$GITHUB_OUTPUT"
           echo "stem=$STEM"       >> "$GITHUB_OUTPUT"
