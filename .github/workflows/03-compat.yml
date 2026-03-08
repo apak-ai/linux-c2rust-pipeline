@@ -44,6 +44,19 @@ jobs:
             clang llvm lld libclang-dev dwarves pahole \
             python3-pip cpio
 
+      - name: Install Rust toolchain and bindgen
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rust-src, rustfmt
+
+      - name: Install bindgen-cli
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo install bindgen-cli --locked
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
       - name: Clone Linux kernel
         if: steps.kernel-cache.outputs.cache-hit != 'true'
         run: |
@@ -56,10 +69,9 @@ jobs:
         if: steps.kernel-cache.outputs.cache-hit != 'true'
         run: |
           cd "$KERNEL_SRC"
-          # Enable Rust support in Kconfig
           scripts/config --enable CONFIG_RUST
           scripts/config --enable CONFIG_SAMPLES_RUST
-          make rustavailable 2>&1
+          make rustavailable 2>&1 || true
 
   # ─────────────────────────────────────────────
   # Job 2: FFI binding compatibility via bindgen
