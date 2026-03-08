@@ -20,9 +20,6 @@ const OTP_READ: u32 = 0x8000_0000;
 const BANK_SIZE: u32 = 128;
 const WORD_SIZE: u32 = 4;
 
-// Minimum MMIO region size: two 32-bit registers.
-const MMIO_SIZE: usize = 8;
-
 /// Private driver state — one instance per platform device.
 #[repr(C)]
 pub struct NintendoOtpPriv {
@@ -83,9 +80,9 @@ impl NintendoOtpPriv {
             iowrite32be(cmd, self.regs.add(HW_OTPCMD));
 
             // SAFETY: `self.regs + HW_OTPDATA` is within the MMIO region
-            // (offset 4, within MMIO_SIZE = 8 bytes). The data register is
+            // (offset 4, two 32-bit registers total). The data register is
             // valid after the command write above completes.
-            let data = ioread32be(self.regs.add(HW_OTPDATA) as *const u8);
+            let data = ioread32be(self.regs.add(HW_OTPDATA).cast::<u8>());
 
             // SAFETY: `out` was derived from the caller-provided `val` buffer
             // of `bytes` bytes. We advance by one `u32` per loop iteration and
@@ -116,11 +113,11 @@ pub unsafe extern "C" fn nintendo_otp_reg_read(
     // SAFETY: `context` is set by `nintendo_otp_probe` to a valid, non-null
     // `NintendoOtpPriv` pointer allocated via `devm_kzalloc`. The kernel
     // nvmem core serialises calls to this callback.
-    let priv_data = &*(context as *const NintendoOtpPriv);
+    let priv_data = &*(context.cast::<NintendoOtpPriv>());
 
     // SAFETY: `val` is provided by the nvmem core and is guaranteed to point
     // to a buffer of `bytes` bytes. `priv_data` is valid by the argument above.
-    priv_data.reg_read(reg, val as *mut u32, bytes)
+    priv_data.reg_read(reg, val.cast::<u32>(), bytes)
 }
 
 /// Initialises the OTP nvmem configuration for a given device.
@@ -142,7 +139,7 @@ pub unsafe fn build_nvmem_config(
     nvmem::Config {
         name,
         dev,
-        priv_data: priv_data as *mut u8,
+        priv_data: priv_data.cast::<u8>(),
         reg_read: Some(nintendo_otp_reg_read),
         read_only: true,
         root_only: true,

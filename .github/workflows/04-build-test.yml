@@ -48,7 +48,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.KERNEL_SRC }}
-          key: kernel-${{ env.KERNEL_VERSION }}-${{ runner.os }}-${{ matrix.arch }}
+          key: kernel-${{ env.KERNEL_VERSION }}-$(date +%Y%W)
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -69,6 +69,13 @@ jobs:
             qemu-system-x86 qemu-system-arm qemu-system-misc \
             cpio
 
+      - name: Clone kernel if cache missed
+        run: |
+          if [ ! -d "$KERNEL_SRC" ]; then
+            sudo git clone --depth=1 --branch "v${{ env.KERNEL_VERSION }}" \
+              https://github.com/torvalds/linux.git "$KERNEL_SRC"
+          fi
+
       - name: Inject & configure kernel
         run: |
           bash scripts/inject_modules.sh \
@@ -76,8 +83,9 @@ jobs:
             --rust-src   src/rust/ \
             --arch       ${{ matrix.arch }}
           cd "$KERNEL_SRC"
-          cp "$GITHUB_WORKSPACE/config/kernel_${{ matrix.arch }}.config" .config
-          make LLVM=1 CROSS_COMPILE=${{ matrix.cross_compile }} olddefconfig
+          make LLVM=1 CROSS_COMPILE=${{ matrix.cross_compile }} ARCH=${{ matrix.arch }} defconfig
+          scripts/config --enable CONFIG_RUST || true
+          make LLVM=1 CROSS_COMPILE=${{ matrix.cross_compile }} ARCH=${{ matrix.arch }} olddefconfig
 
       - name: Build kernel
         run: |
@@ -121,7 +129,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.KERNEL_SRC }}
-          key: kernel-${{ env.KERNEL_VERSION }}-${{ runner.os }}-${{ matrix.arch }}
+          key: kernel-${{ env.KERNEL_VERSION }}-$(date +%Y%W)
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -258,7 +266,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.KERNEL_SRC }}
-          key: kernel-${{ env.KERNEL_VERSION }}-${{ runner.os }}-${{ matrix.arch }}
+          key: kernel-${{ env.KERNEL_VERSION }}-$(date +%Y%W)
 
       - name: Download kernel image
         uses: actions/download-artifact@v4
