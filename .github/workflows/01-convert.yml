@@ -40,22 +40,25 @@ jobs:
             bear clang llvm lld libclang-dev \
             python3-pip dwarves pahole
 
-      - name: Cache kernel source
-        uses: actions/cache@v4
-        with:
-          path: /opt/linux-src
-          key: linux-src-6.12
-
-      - name: Clone Linux kernel source
+      - name: Generate compile_commands.json for src/c files
         run: |
-          if [ ! -d /opt/linux-src ]; then
-            sudo git clone --depth=1 --branch v6.12 \
-              https://github.com/torvalds/linux.git /opt/linux-src
-          fi
+          python3 - <<'EOF'
+          import json, os, glob
 
-      - name: Generate compile_commands.json via Bear
-        run: |
-          bash scripts/gen_compile_commands.sh
+          repo = os.getcwd()
+          files = glob.glob("src/c/**/*.c", recursive=True)
+          db = [
+            {
+              "directory": repo,
+              "command": f"clang -I/usr/include -Isrc/c -c {f} -o /dev/null",
+              "file": os.path.join(repo, f)
+            }
+            for f in files
+          ]
+          with open("compile_commands.json", "w") as fh:
+            json.dump(db, fh, indent=2)
+          print(f"Generated compile_commands.json with {len(db)} entries")
+          EOF
           test -f compile_commands.json || { echo "::error::compile_commands.json not generated"; exit 1; }
 
       - name: Determine files to convert
