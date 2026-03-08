@@ -295,4 +295,5 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: All compatibility checks passed
-        run: echo "### Compatibility Gate: PASSED" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "### Compatibility Gate: PASSED" >> "$GITHUB_STEP_SUMMARY"
