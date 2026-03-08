@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Nintendo Wii and Wii U OTP driver; touch; touch
+ * Nintendo Wii and Wii U OTP driver; touch; touch; touch
  *
  * This is a driver exposing the OTP of a Nintendo Wii or Wii U console.
  *
