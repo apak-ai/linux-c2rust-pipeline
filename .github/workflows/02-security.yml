@@ -133,7 +133,6 @@ jobs:
             --deny yanked \
             --json > audit_report.json 2>&1 || AUDIT_FAILED=1
 
-          python3 scripts/format_audit.py audit_report.json || true
           [ -z "$AUDIT_FAILED" ] || exit 1
 
       - uses: actions/upload-artifact@v4
