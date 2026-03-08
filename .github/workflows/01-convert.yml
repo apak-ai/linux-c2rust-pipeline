@@ -183,6 +183,14 @@ jobs:
           path: src/rust/generated/
           merge-multiple: true
 
+      - name: Ensure labels exist
+        run: |
+          gh label create "c2rust"                 --color "0075ca" --description "C to Rust conversion" --force
+          gh label create "needs-security-review"  --color "e4e669" --description "Requires security audit" --force
+          gh label create "needs-compat-check"     --color "d93f0b" --description "Requires compatibility check" --force
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Commit generated Rust files
         run: |
           git config user.name  "c2rust-bot"
