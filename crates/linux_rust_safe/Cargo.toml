@@ -1,0 +1,10 @@
+[package]
+name = "linux_rust_safe"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+kernel = { path = "../../vendor/kernel" }
+linux_rust_bindings = { path = "../linux_rust_bindings" }
+
+[dev-dependencies]
