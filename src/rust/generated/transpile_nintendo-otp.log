@@ -1,0 +1,61 @@
+src/c/nintendo-otp.c:15:10: fatal error: 'linux/device.h' file not found
+   15 | #include <linux/device.h>
+      |          ^~~~~~~~~~~~~~~~
+1 error generated.
+Error while processing /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c.
+Transpiling nintendo-otp.c
+[33mwarning:[0m Missing child 94730019511368 of node AstNode { tag: TagUnaryOperator, children: [Some(94730019511368)], loc: SrcSpan { fileid: 1, begin_line: 76, begin_column: 23, end_line: 76, end_column: 30 }, type_id: Some(94730019095728), rvalue: RValue, macro_expansions: [], macro_expansion_text: None, extras: [Text("&"), Bool(false)] }
+Exported Clang AST was invalid. Check warnings above for unimplemented features.
+--> /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c:76:23
+ [-Wclang-ast]
+[33mwarning:[0m Missing child 94730019514152 of node AstNode { tag: TagBinaryOperator, children: [Some(94730019514152), Some(94730019514584)], loc: SrcSpan { fileid: 1, begin_line: 94, begin_column: 2, end_line: 94, end_column: 53 }, type_id: Some(94730019095728), rvalue: RValue, macro_expansions: [], macro_expansion_text: None, extras: [Text("="), Null, Null] }
+Exported Clang AST was invalid. Check warnings above for unimplemented features.
+--> /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c:94:2
+ [-Wclang-ast]
+[33mwarning:[0m Missing child 94730019516488 of node AstNode { tag: TagCallExpr, children: [Some(94730019516400), Some(94730019516488)], loc: SrcSpan { fileid: 1, begin_line: 96, begin_column: 10, end_line: 96, end_column: 28 }, type_id: Some(94730019095728), rvalue: RValue, macro_expansions: [], macro_expansion_text: None, extras: [] }
+Exported Clang AST was invalid. Check warnings above for unimplemented features.
+--> /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c:96:10
+ [-Wclang-ast]
+[33mwarning:[0m Missing child 94730019516912 of node AstNode { tag: TagVarDecl, children: [Some(94730019516912)], loc: SrcSpan { fileid: 1, begin_line: 99, begin_column: 43, end_line: 99, end_column: 43 }, type_id: Some(94730019508688), rvalue: LValue, macro_expansions: [], macro_expansion_text: None, extras: [Text("data"), Bool(false), Bool(false), Bool(false), Bool(true), Array([])] }
+Exported Clang AST was invalid. Check warnings above for unimplemented features.
+--> /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c:99:43
+ [-Wclang-ast]
+[33mwarning:[0m Missing child 94730019504088 of node AstNode { tag: TagBinaryOperator, children: [Some(94730019504088), Some(94730019504120)], loc: SrcSpan { fileid: 1, begin_line: 53, begin_column: 14, end_line: 53, end_column: 22 }, type_id: Some(94730019095728), rvalue: RValue, macro_expansions: [], macro_expansion_text: None, extras: [Text("/"), Null, Null] }
+Exported Clang AST was invalid. Check warnings above for unimplemented features.
+--> /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c:53:14
+ [-Wclang-ast]
+[33mwarning:[0m Missing child 94730019517048 of node AstNode { tag: TagBinaryOperator, children: [Some(94730019517048), Some(94730019517176)], loc: SrcSpan { fileid: 1, begin_line: 100, begin_column: 3, end_line: 100, end_column: 23 }, type_id: Some(94730019095728), rvalue: RValue, macro_expansions: [], macro_expansion_text: None, extras: [Text("="), Null, Null] }
+Exported Clang AST was invalid. Check warnings above for unimplemented features.
+--> /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c:100:3
+ [-Wclang-ast]
+[33mwarning:[0m Missing child 94730019516672 of node AstNode { tag: TagIfStmt, children: [Some(94730019516672), Some(94730019517648), None], loc: SrcSpan { fileid: 1, begin_line: 98, begin_column: 2, end_line: 102, end_column: 2 }, type_id: None, rvalue: LValue, macro_expansions: [], macro_expansion_text: None, extras: [] }
+Exported Clang AST was invalid. Check warnings above for unimplemented features.
+--> /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c:98:2
+ [-Wclang-ast]
+[33mwarning:[0m Missing child 94730019516096 of node AstNode { tag: TagCallExpr, children: [Some(94730019516008), Some(94730019516096)], loc: SrcSpan { fileid: 1, begin_line: 95, begin_column: 6, end_line: 95, end_column: 23 }, type_id: Some(94730019095728), rvalue: RValue, macro_expansions: [], macro_expansion_text: None, extras: [] }
+Exported Clang AST was invalid. Check warnings above for unimplemented features.
+--> /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c:95:6
+ [-Wclang-ast]
+[33mwarning:[0m Missing child 94730019512032 of node AstNode { tag: TagCallExpr, children: [Some(94730019512000), Some(94730019512032), Some(94730019512064)], loc: SrcSpan { fileid: 1, begin_line: 78, begin_column: 3, end_line: 78, end_column: 45 }, type_id: Some(94730019095728), rvalue: RValue, macro_expansions: [], macro_expansion_text: None, extras: [] }
+Exported Clang AST was invalid. Check warnings above for unimplemented features.
+--> /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c:78:3
+ [-Wclang-ast]
+[33mwarning:[0m Missing child 94730019518000 of node AstNode { tag: TagBinaryOperator, children: [Some(94730019518000), Some(94730019518072)], loc: SrcSpan { fileid: 1, begin_line: 105, begin_column: 2, end_line: 105, end_column: 16 }, type_id: Some(94730019095728), rvalue: RValue, macro_expansions: [], macro_expansion_text: None, extras: [Text("="), Null, Null] }
+Exported Clang AST was invalid. Check warnings above for unimplemented features.
+--> /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c:105:2
+ [-Wclang-ast]
+[33mwarning:[0m Missing child 94730019518456 of node AstNode { tag: TagUnaryOperator, children: [Some(94730019518456)], loc: SrcSpan { fileid: 1, begin_line: 107, begin_column: 35, end_line: 107, end_column: 36 }, type_id: Some(94730019095728), rvalue: RValue, macro_expansions: [], macro_expansion_text: None, extras: [Text("&"), Bool(false)] }
+Exported Clang AST was invalid. Check warnings above for unimplemented features.
+--> /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c:107:35
+ [-Wclang-ast]
+[33mwarning:[0m Missing child 94730019517328 of node AstNode { tag: TagBinaryOperator, children: [Some(94730019517328), Some(94730019517584)], loc: SrcSpan { fileid: 1, begin_line: 101, begin_column: 3, end_line: 101, end_column: 35 }, type_id: Some(94730019095728), rvalue: RValue, macro_expansions: [], macro_expansion_text: None, extras: [Text("="), Null, Null] }
+Exported Clang AST was invalid. Check warnings above for unimplemented features.
+--> /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c:101:3
+ [-Wclang-ast]
+[33mwarning:[0m Missing child 94730019517792 of node AstNode { tag: TagBinaryOperator, children: [Some(94730019517792), Some(94730019517864)], loc: SrcSpan { fileid: 1, begin_line: 104, begin_column: 2, end_line: 104, end_column: 15 }, type_id: Some(94730019095728), rvalue: RValue, macro_expansions: [], macro_expansion_text: None, extras: [Text("="), Null, Null] }
+Exported Clang AST was invalid. Check warnings above for unimplemented features.
+--> /home/runner/work/linux-c2rust-pipeline/linux-c2rust-pipeline/src/c/nintendo-otp.c:104:2
+ [-Wclang-ast]
+thread 'main' panicked at /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/c2rust-transpile-0.20.0/src/c_ast/conversion.rs:827:22:
+Type conversion not implemented for TagTypeUnknown expecting 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
