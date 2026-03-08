@@ -35,43 +35,13 @@ jobs:
           path: ${{ env.KERNEL_SRC }}
           key: ${{ steps.cache-key.outputs.key }}
 
-      - name: Install kernel build deps
-        if: steps.kernel-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential flex bison bc libssl-dev libelf-dev \
-            clang llvm lld libclang-dev dwarves pahole \
-            python3-pip cpio
-
-      - name: Install Rust toolchain and bindgen
-        if: steps.kernel-cache.outputs.cache-hit != 'true'
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: rust-src, rustfmt
-
-      - name: Install bindgen-cli
-        if: steps.kernel-cache.outputs.cache-hit != 'true'
-        run: |
-          cargo install bindgen-cli --locked
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
       - name: Clone Linux kernel
         if: steps.kernel-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --depth=1 \
+          sudo git clone --depth=1 \
             --branch "v${{ env.KERNEL_VERSION }}" \
             https://github.com/torvalds/linux.git \
             "$KERNEL_SRC"
-
-      - name: Apply Rust-for-Linux patches
-        if: steps.kernel-cache.outputs.cache-hit != 'true'
-        run: |
-          cd "$KERNEL_SRC"
-          scripts/config --enable CONFIG_RUST
-          scripts/config --enable CONFIG_SAMPLES_RUST
-          make rustavailable 2>&1 || true
 
   # ─────────────────────────────────────────────
   # Job 2: FFI binding compatibility via bindgen
@@ -92,8 +62,13 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - name: Install bindgen
-        run: cargo install bindgen-cli --locked
+      - name: Install build deps and bindgen
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential flex bison bc libssl-dev libelf-dev \
+            clang llvm lld libclang-dev
+          cargo install bindgen-cli --version 0.65.1 --locked
 
       - name: Generate Rust bindings from kernel headers
         run: |
