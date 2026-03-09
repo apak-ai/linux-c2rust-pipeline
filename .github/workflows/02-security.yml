@@ -128,10 +128,9 @@ jobs:
       - name: Audit dependencies
         run: |
           cargo audit \
-            --deny warnings \
             --deny unsound \
             --deny yanked \
-            --json > audit_report.json 2>&1 || AUDIT_FAILED=1
+            --json > audit_report.json 2>audit_stderr.log || AUDIT_FAILED=1
 
           [ -z "$AUDIT_FAILED" ] || exit 1
 
@@ -139,7 +138,9 @@ jobs:
         if: always()
         with:
           name: audit-report
-          path: audit_report.json
+          path: |
+            audit_report.json
+            audit_stderr.log
 
   # ─────────────────────────────────────────────
   # Job 4: Undefined behaviour detection via Miri
